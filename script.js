@@ -18,34 +18,38 @@ document.addEventListener('DOMContentLoaded', () => {
     let pinnedTracks = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
 
     // --- MAIN SEARCH FUNCTION ---
-    async function fetchDiscoveryData() {
-        const seed = seedArtistInput.value.trim();
-        if (!seed) return;
+async function fetchDiscoveryData() {
+    const seed = seedArtistInput.value.trim();
+    if (!seed) return;
 
-        loadingDiv.style.display = 'block';
-        errorDiv.style.display = 'none';
-        discoveredTracksGrid.innerHTML = '';
+    loadingDiv.style.display = 'block';
+    errorDiv.style.display = 'none';
+    discoveredTracksGrid.innerHTML = '';
 
-        try {
-            // 1. Get Recommendations (Last.fm)
-            const lfmUrl = `https://ws.audioscrobbler.com/2.0/?method=artist.getSimilar&artist=${encodeURIComponent(seed)}&api_key=${LASTFM_KEY}&format=json&limit=5`;
-            const lfmRes = await fetch(`${PROXY}${encodeURIComponent(lfmUrl)}`);
-            const lfmData = await lfmRes.json();
+    try {
+        // 1. Get Recommendations (Last.fm) - This is working
+        const lfmUrl = `https://ws.audioscrobbler.com/2.0/?method=artist.getSimilar&artist=${encodeURIComponent(seed)}&api_key=${LASTFM_KEY}&format=json&limit=5`;
+        const lfmRes = await fetch(lfmUrl);
+        const lfmData = await lfmRes.json();
+        
+        const artists = lfmData.similarartists.artist;
+        let foundTracks = [];
+
+        // 2. Search SoundCloud using a more robust Proxy
+        for (let artist of artists) {
+            const scSearchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(artist.name)}&client_id=${SC_CLIENT_ID}&limit=3`;
             
-            const artists = lfmData.similarartists.artist;
-            let foundTracks = [];
-
-            // 2. Search SoundCloud for each Artist
-            for (let artist of artists) {
-                const scSearchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(artist.name)}&client_id=${SC_CLIENT_ID}&limit=3`;
+            // We use allorigins.win and wrap it in a try-catch for each artist
+            try {
+                const proxiedUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(scSearchUrl)}`;
+                const scRes = await fetch(proxiedUrl);
+                const scRaw = await scRes.json();
                 
-                // Fetch through proxy to get Play Counts
-                const scRes = await fetch(`${PROXY}${encodeURIComponent(scSearchUrl)}`);
-                const scData = await scRes.json();
+                // AllOrigins returns the data as a string in the 'contents' property
+                const scData = JSON.parse(scRaw.contents);
 
                 if (scData.collection) {
                     scData.collection.forEach(track => {
-                        // FILTER: Emerging tracks for your 140-150 BPM sets
                         if (track.playback_count < 25000) {
                             foundTracks.push({
                                 artist: artist.name,
@@ -58,17 +62,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
                 }
+            } catch (scErr) {
+                console.warn(`SoundCloud search failed for ${artist.name}. Skipping...`);
             }
-            renderTracks(foundTracks, discoveredTracksGrid);
-
-        } catch (err) {
-            console.error("Discovery Error:", err);
-            errorDiv.textContent = "Error: SoundCloud blocked the proxy. Try again in 1 minute.";
-            errorDiv.style.display = 'block';
-        } finally {
-            loadingDiv.style.display = 'none';
         }
+        renderTracks(foundTracks, discoveredTracksGrid);
+
+    } catch (err) {
+        console.error("Discovery Error:", err);
+        errorDiv.textContent = "Search failed. SoundCloud might be blocking the proxy. Try again in a moment.";
+        errorDiv.style.display = 'block';
+    } finally {
+        loadingDiv.style.display = 'none';
     }
+}
 
     // --- UI HELPERS ---
     function renderTracks(tracks, container, isPinned = false) {

@@ -18,75 +18,69 @@ document.addEventListener('DOMContentLoaded', () => {
     let pinnedTracks = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
 
     // --- MAIN DISCOVERY LOGIC ---
-    async function fetchDiscoveryData() {
-        const seed = seedArtistInput.value.trim();
-        if (!seed) return;
+async function fetchDiscoveryData() {
+    const seed = seedArtistInput.value.trim();
+    if (!seed) return;
 
-        console.log("Starting Search for:", seed);
-        loadingDiv.style.display = 'block';
-        errorDiv.style.display = 'none';
-        discoveredTracksGrid.innerHTML = '';
+    loadingDiv.style.display = 'block';
+    errorDiv.style.display = 'none';
+    discoveredTracksGrid.innerHTML = '';
 
-        try {
-            // 1. Get Recommendations from Last.fm
-            const lfmUrl = `https://ws.audioscrobbler.com/2.0/?method=artist.getSimilar&artist=${encodeURIComponent(seed)}&api_key=${LASTFM_KEY}&format=json&limit=5`;
-            const lfmRes = await fetch(lfmUrl);
-            const lfmData = await lfmRes.json();
+    try {
+        // 1. Last.fm (Recommendations) - No proxy needed usually
+        const lfmUrl = `https://ws.audioscrobbler.com/2.0/?method=artist.getSimilar&artist=${encodeURIComponent(seed)}&api_key=${LASTFM_KEY}&format=json&limit=5`;
+        const lfmRes = await fetch(lfmUrl);
+        const lfmData = await lfmRes.json();
+        
+        const artists = lfmData.similarartists.artist;
+        let foundTracks = [];
+
+        // 2. SoundCloud Search (Using proxy.cors.sh)
+        for (let artist of artists) {
+            const scSearchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(artist.name + " Remix")}&client_id=${SC_CLIENT_ID}&limit=3`;
             
-            if (!lfmData.similarartists || !lfmData.similarartists.artist) {
-                throw new Error("Artist not found on Last.fm.");
-            }
-
-            const artists = lfmData.similarartists.artist;
-            let foundTracks = [];
-
-            // 2. Search SoundCloud via AllOrigins Proxy
-            for (let artist of artists) {
-                console.log("Searching SoundCloud for similar artist:", artist.name);
-                
-                // We search for [Artist] + "Remix" to find emerging underground flips
-                const scSearchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(artist.name + " Remix")}&client_id=${SC_CLIENT_ID}&limit=5`;
-                const proxiedUrl = `${PROXY_URL}${encodeURIComponent(scSearchUrl)}`;
-                
-                try {
-                    const scRes = await fetch(proxiedUrl);
-                    const scRaw = await scRes.json();
-                    const scData = JSON.parse(scRaw.contents);
-
-                    if (scData.collection && scData.collection.length > 0) {
-                        scData.collection.forEach(track => {
-                            const plays = track.playback_count || 0;
-                            
-                            // FILTER: Emerging tracks (< 50k plays)
-                            if (plays < 50000 && plays > 100) {
-                                foundTracks.push({
-                                    artist: artist.name,
-                                    title: track.title,
-                                    plays: plays,
-                                    url: track.permalink_url,
-                                    genre: track.genre || "Bass",
-                                    bpm: track.bpm || "???"
-                                });
-                            }
-                        });
+            // We use the CORS.SH proxy which is built for API developers
+            const proxiedUrl = `https://proxy.cors.sh/${scSearchUrl}`;
+            
+            try {
+                const scRes = await fetch(proxiedUrl, {
+                    headers: {
+                        'x-cors-gratis': 'true' // This tells the proxy you are using the free tier
                     }
-                } catch (scErr) {
-                    console.warn(`Proxy failed for ${artist.name}. SoundCloud might be rate-limiting.`);
+                });
+                
+                if (!scRes.ok) throw new Error("SoundCloud Proxy Error");
+                const scData = await scRes.json();
+
+                if (scData.collection) {
+                    scData.collection.forEach(track => {
+                        const plays = track.playback_count || 0;
+                        if (plays < 50000 && plays > 100) {
+                            foundTracks.push({
+                                artist: artist.name,
+                                title: track.title,
+                                plays: plays,
+                                url: track.permalink_url,
+                                genre: track.genre || "Bass",
+                                bpm: track.bpm || "???"
+                            });
+                        }
+                    });
                 }
+            } catch (scErr) {
+                console.warn(`Search failed for ${artist.name}. Service might be busy.`);
             }
-
-            // Remove potential duplicates
-            const uniqueTracks = foundTracks.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
-            renderTracks(uniqueTracks, discoveredTracksGrid);
-
-        } catch (err) {
-            console.error("Discovery Error:", err);
-            errorDiv.textContent = "Error: " + err.message;
-            errorDiv.style.display = 'block';
-        } finally {
-            loadingDiv.style.display = 'none';
         }
+        renderTracks(foundTracks, discoveredTracksGrid);
+
+    } catch (err) {
+        console.error("Discovery Error:", err);
+        errorDiv.textContent = "The connection is being blocked. Try again in a few minutes.";
+        errorDiv.style.display = 'block';
+    } finally {
+        loadingDiv.style.display = 'none';
     }
+}
 
     // --- UI HELPERS ---
     function renderTracks(tracks, container, isPinned = false) {

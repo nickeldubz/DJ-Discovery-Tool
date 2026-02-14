@@ -1,0 +1,48 @@
+:root {
+    --bg: #0a0a0a;
+    --card: #141414;
+    --neon-green: #39ff14;
+    --neon-blue: #00f3ff;
+    --text: #e0e0e0;
+}
+
+body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    margin: 0; padding: 20px;
+}
+
+.app-container { max-width: 1100px; margin: 0 auto; }
+
+header h1 { font-size: 2.5rem; letter-spacing: 2px; margin-bottom: 0; }
+.glow { color: var(--neon-green); text-shadow: 0 0 10px var(--neon-green); }
+
+.search-bar { display: flex; gap: 10px; margin: 30px 0; }
+input { 
+    flex: 1; padding: 15px; border-radius: 4px; border: 1px solid #333;
+    background: #1a1a1a; color: white; font-size: 1rem;
+}
+
+button { 
+    padding: 15px 30px; background: var(--neon-green); color: black; 
+    border: none; font-weight: bold; cursor: pointer; transition: 0.3s;
+}
+
+button:hover { background: white; box-shadow: 0 0 15px var(--neon-green); }
+
+.dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+
+.track-card { 
+    background: var(--card); padding: 20px; border-radius: 8px; 
+    margin-bottom: 15px; border-left: 4px solid var(--neon-blue);
+}
+
+.track-card h3 { margin: 0 0 5px 0; color: var(--neon-blue); }
+.details { font-size: 0.8rem; color: #888; margin: 10px 0; }
+.bpm { color: var(--neon-green); font-weight: bold; }
+
+.actions { display: flex; justify-content: space-between; align-items: center; }
+.actions a { color: white; text-decoration: none; font-size: 0.8rem; border-bottom: 1px solid white; }
+
+@media (max-width: 768px) { .dashboard { grid-template-columns: 1fr; } }

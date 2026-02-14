@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NAME DROP | Discovery Crate</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>NAME DROP <span class="glow">CRATE</span></h1>
+            <p>140-150 BPM Emerging Bass Discovery</p>
+        </header>
+
+        <section class="search-bar">
+            <input type="text" id="seedArtistInput" placeholder="Enter Seed (e.g., ISOxo, RL Grime, Jantsen)">
+            <button id="discoverBtn">DIG</button>
+        </section>
+
+        <div id="loading" class="status-msg" style="display: none;">Scanning frequencies...</div>
+        <div id="error" class="status-msg error" style="display: none;"></div>
+
+        <main class="dashboard">
+            <div class="column">
+                <h2>FRESH FINDS</h2>
+                <div id="discoveredTracksGrid" class="grid"></div>
+            </div>
+            
+            <div class="column">
+                <h2>MY CRATE</h2>
+                <div id="pinnedTracksGrid" class="grid"></div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by Last.fm, GetSongBPM & SoundCloud</p>
+        </footer>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

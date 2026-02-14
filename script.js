@@ -1,11 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("NAME DROP | Stealth Discovery Crate Active");
+    console.log("NAME DROP | Last.fm Discovery Engine Active");
 
-    // --- API CREDENTIALS ---
     const LASTFM_KEY = "533281fde87701480cd27a936bcaef0b";
-    const SC_CLIENT_ID = "cES7wr3PiVoJHfpPvtmpDLnx9NjRzMha";
-
-    // --- UI ELEMENTS ---
+    
+    // UI Elements
     const seedArtistInput = document.getElementById('seedArtistInput');
     const discoverBtn = document.getElementById('discoverBtn');
     const discoveredTracksGrid = document.getElementById('discoveredTracksGrid');
@@ -16,120 +14,66 @@ document.addEventListener('DOMContentLoaded', () => {
     const STORAGE_KEY = 'namedrop_pinned_crate';
     let pinnedTracks = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
 
-    // --- UTILITIES ---
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    // --- STEALTH FETCH WITH PROXY ROTATION ---
-    async function fetchWithStealth(scUrl, retries = 2) {
-        // We rotate proxies to dodge IP-based rate limiting
-        const proxies = [
-            { url: "https://proxy.cors.sh/", type: "cors-sh" },
-            { url: "https://api.allorigins.win/get?url=", type: "allorigins" }
-        ];
-        
-        const currentProxy = proxies[retries % proxies.length];
-        const isAllOrigins = currentProxy.type === "allorigins";
-        const finalUrl = isAllOrigins 
-            ? `${currentProxy.url}${encodeURIComponent(scUrl)}` 
-            : `${currentProxy.url}${scUrl}`;
-
-        try {
-            console.log(`Attempting dig via ${currentProxy.type}...`);
-            
-            const response = await fetch(finalUrl, {
-                headers: isAllOrigins ? {} : { 'x-cors-gratis': 'true' }
-            });
-
-            if (response.status === 429) {
-                if (retries > 0) {
-                    // JITTER: Wait between 5-8 seconds to mimic a human browser
-                    const jitter = Math.floor(Math.random() * 3000) + 5000;
-                    console.warn(`Rate limit! Cooling down for ${jitter/1000}s...`);
-                    await sleep(jitter);
-                    return fetchWithStealth(scUrl, retries - 1);
-                }
-                throw new Error("SoundCloud is currently locked. Try again in 5 minutes.");
-            }
-
-            const data = await response.json();
-            const result = isAllOrigins ? JSON.parse(data.contents) : data;
-            
-            if (!result || (!result.collection && !isAllOrigins)) throw new Error("Invalid Data Received");
-            return result;
-
-        } catch (err) {
-            if (retries > 0) {
-                await sleep(2000);
-                return fetchWithStealth(scUrl, retries - 1);
-            }
-            throw err;
-        }
-    }
-
-    // --- MAIN DISCOVERY LOGIC ---
     async function fetchDiscoveryData() {
-        const seed = seedArtistInput.value.trim();
-        if (!seed) return;
+        const query = seedArtistInput.value.trim();
+        if (!query) return;
 
         loadingDiv.style.display = 'block';
         errorDiv.style.display = 'none';
         discoveredTracksGrid.innerHTML = '';
-        console.log(`Starting stealth dig for: ${seed}`);
 
         try {
-            // 1. Get Recommendations from Last.fm
-            const lfmUrl = `https://ws.audioscrobbler.com/2.0/?method=artist.getSimilar&artist=${encodeURIComponent(seed)}&api_key=${LASTFM_KEY}&format=json&limit=5`;
-            const lfmRes = await fetch(lfmUrl);
-            const lfmData = await lfmRes.json();
+            // STEP 1: Get the Top Tags for your search (e.g., Trap, Bass, UKG)
+            // We search for tracks and pull their tags to understand the "lane"
+            const searchUrl = `https://ws.audioscrobbler.com/2.0/?method=artist.gettoptags&artist=${encodeURIComponent(query)}&api_key=${LASTFM_KEY}&format=json`;
+            const searchRes = await fetch(searchUrl);
+            const searchData = await searchRes.json();
             
-            if (!lfmData.similarartists || !lfmData.similarartists.artist) {
-                throw new Error("Artist not found. Try a different seed.");
+            // Default tags if the artist search fails
+            let targetTags = ['trap', 'bass', 'electronic']; 
+            if (searchData.toptags && searchData.toptags.tag) {
+                targetTags = searchData.toptags.tag.slice(0, 3).map(t => t.name.toLowerCase());
             }
 
-            const artists = lfmData.similarartists.artist;
-            let foundTracks = [];
+            console.log("Digging in tags:", targetTags);
 
-            // 2. Sequential Search with Jitter
-            for (let artist of artists) {
-                console.log(`Searching for: ${artist.name}`);
-                
-                // limit=2 to keep the request size small and inconspicuous
-                const scSearchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(artist.name + " Remix")}&client_id=${SC_CLIENT_ID}&limit=2`;
-                
-                try {
-                    const scData = await fetchWithStealth(scSearchUrl);
+            let allFound = [];
 
-                    if (scData && scData.collection) {
-                        scData.collection.forEach(track => {
-                            const plays = track.playback_count || 0;
-                            // FILTER: Emerging 140-150 BPM Bass (< 50,000 plays)
-                            if (plays < 50000 && plays > 100) {
-                                foundTracks.push({
-                                    artist: artist.name,
-                                    title: track.title,
-                                    plays: plays,
-                                    url: track.permalink_url,
-                                    genre: track.genre || "Bass",
-                                    bpm: track.bpm || "???"
-                                });
-                            }
-                        });
-                    }
+            // STEP 2: Pull Top Tracks for those tags
+            for (let tag of targetTags) {
+                const tagUrl = `https://ws.audioscrobbler.com/2.0/?method=tag.gettoptracks&tag=${tag}&api_key=${LASTFM_KEY}&format=json&limit=20`;
+                const tagRes = await fetch(tagUrl);
+                const tagData = await tagRes.json();
 
-                    // Standard spacing (3.5s) to avoid triggering security
-                    await sleep(3500);
-
-                } catch (scErr) {
-                    console.error(`Skipped ${artist.name}:`, scErr.message);
+                if (tagData.tracks && tagData.tracks.track) {
+                    tagData.tracks.track.forEach(track => {
+                        // FILTER: Only keep tracks with < 100k listeners (Emerging talent)
+                        // Note: Last.fm counts are different than SC plays. 100k is "Underground" here.
+                        const listeners = parseInt(track.listeners);
+                        if (listeners < 100000) {
+                            allFound.push({
+                                artist: track.artist.name,
+                                title: track.name,
+                                plays: listeners, // Using Listeners as the "Play Count" proxy
+                                url: track.url,
+                                genre: tag.toUpperCase(),
+                                bpm: "140-150" // Tag-based assumption for your sets
+                            });
+                        }
+                    });
                 }
             }
 
-            const uniqueTracks = foundTracks.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
-            renderTracks(uniqueTracks, discoveredTracksGrid);
+            // Remove duplicates and Sort by most "Underground" (lowest listeners)
+            const unique = allFound
+                .filter((v, i, a) => a.findIndex(t => (t.artist === v.artist && t.title === v.title)) === i)
+                .sort((a, b) => a.plays - b.plays);
+
+            renderTracks(unique.slice(0, 15), discoveredTracksGrid);
 
         } catch (err) {
             console.error("Discovery Error:", err);
-            errorDiv.textContent = err.message || "Connection issues. Please try again later.";
+            errorDiv.textContent = "Last.fm is currently unavailable. Try again in a moment.";
             errorDiv.style.display = 'block';
         } finally {
             loadingDiv.style.display = 'none';
@@ -139,23 +83,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- UI HELPERS ---
     function renderTracks(tracks, container, isPinned = false) {
         if (tracks.length === 0 && !isPinned) {
-            container.innerHTML = "<p>No emerging tracks found. Try a more underground artist.</p>";
+            container.innerHTML = "<p>No emerging tracks found in these tags.</p>";
             return;
         }
 
         container.innerHTML = tracks.map(track => {
             const encoded = encodeURIComponent(JSON.stringify(track));
+            // We use a SoundCloud search link as the "LISTEN" action
+            const scSearchLink = `https://soundcloud.com/search?q=${encodeURIComponent(track.artist + " " + track.title)}`;
+            
             return `
             <div class="track-card">
                 <div class="genre-tag">${track.genre}</div>
                 <h3>${track.title}</h3>
                 <p>by ${track.artist}</p>
                 <div class="details">
-                    <span class="bpm">${track.bpm} BPM</span> | 
-                    <span class="plays">${track.plays.toLocaleString()} Plays</span>
+                    <span class="plays">${track.plays.toLocaleString()} Listeners</span>
                 </div>
                 <div class="actions">
-                    <a href="${track.url}" target="_blank">LISTEN</a>
+                    <a href="${scSearchLink}" target="_blank">SEARCH SC</a>
                     <button class="pin-btn" onclick="handlePinClick('${encoded}', ${isPinned})">
                         ${isPinned ? 'REMOVE' : 'PIN'}
                     </button>
@@ -164,21 +110,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
     }
 
-    // --- PINNING LOGIC ---
     window.handlePinClick = (encodedTrack, isPinned) => {
         const track = JSON.parse(decodeURIComponent(encodedTrack));
-        if (isPinned) {
-            pinnedTracks = pinnedTracks.filter(p => p.url !== track.url);
-        } else {
-            if (!pinnedTracks.some(p => p.url === track.url)) {
-                pinnedTracks.push(track);
-            }
-        }
+        if (isPinned) pinnedTracks = pinnedTracks.filter(p => p.url !== track.url);
+        else if (!pinnedTracks.some(p => p.url === track.url)) pinnedTracks.push(track);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(pinnedTracks));
         renderTracks(pinnedTracks, pinnedTracksGrid, true);
     };
 
-    // --- EVENT LISTENERS ---
     discoverBtn.addEventListener('click', fetchDiscoveryData);
     seedArtistInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') fetchDiscoveryData();
